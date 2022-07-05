@@ -54,16 +54,38 @@
 //     In order to save calibration value, press TX button briefly. TX LED will flash 3 times which indicates that Calibration value is saved.
 // 10- Power off ADX.
 
+void initialize_eeprom_data();
+void Calibration();
+
 // **********************************[ DEFINE's ]***********************************************
 #define UP 2   //2    // UP Switch
 #define DOWN 3  //3  // DOWN Switch
 #define TXSW 4  // TX Switch
 
-#define TX 13 //TX LED
+#define TX    13   //TX LED
 #define WSPR  9 //9 WSPR LED 
-#define JS8  10 //  10 JS8 LED
-#define FT4  11 //  11  FT4 LED
-#define FT8 12 //12  FT8 LED
+#define JS8   10 //  10 JS8 LED
+#define FT4   11 //  11  FT4 LED
+#define FT8   12  //12  FT8 LED
+
+
+//**********************************[ BAND SELECT ]************************************************
+// ADX can support up to 4 bands on board. 
+// To change bands press SW1 and SW2 simultaneously. Band LED will flash 3 times briefly and stay lit for the stored band. also TX LED will be lit to indicate
+// that Band select mode is active. Now change band bank by pressing SW1(<---) or SW2(--->). When desired band bank is selected press TX button briefly to exit band select mode. 
+// Now the new selected band bank will flash 3 times and then stored mode LED will be lit. 
+// TX won't activate when changing bands so don't worry on pressing TX button when changing bands in band mode.
+// Supported Bands are: 80m, 40m, 30m, 20m,17m, 15m
+
+uint8_t ModePins[4] = {WSPR, JS8, FT4, FT8};
+unsigned long ModeFreqs[6][4] {//WSPR     JS8      FT4      FT8    
+                                {21094600, 21078000, 21140000, 21074000}, //Band0 - 10m 
+                                {18104600, 18104000, 18104000, 18100000}, //Band1 - 15m
+                                {14095600, 14078000, 14080000, 14074000}, //Band2 - 20m
+                                {10138700, 10130000, 10140000, 10136000}, //Band3 - 30m
+                                { 7038600,  7078000,  7047500,  7074000}, //Band4 - 40m
+                                { 3568600,  3578000,  3575000,  3573000}, //Band5 - 80m
+                              };
 
 #define RX  8 // RX SWITCH
 #define SI5351_REF    25000000UL  //change this to the frequency of the crystal on your si5351’s PCB, usually 25 or 27 MHz
@@ -380,22 +402,7 @@ int Band = 0;
 int UP_State;
 int DOWN_State;
 int TXSW_State;
-int Bdly = 250;
-
-//**********************************[ BAND SELECT ]************************************************
-// ADX can support up to 4 bands on board. Those 4 bands needs to be assigned to Band1 ... Band4 from supported 6 bands.
-// To change bands press SW1 and SW2 simultaneously. Band LED will flash 3 times briefly and stay lit for the stored band. also TX LED will be lit to indicate
-// that Band select mode is active. Now change band bank by pressing SW1(<---) or SW2(--->). When desired band bank is selected press TX button briefly to exit band select mode. 
-// Now the new selected band bank will flash 3 times and then stored mode LED will be lit. 
-// TX won't activate when changing bands so don't worry on pressing TX button when changing bands in band mode.
-
-// Assign your prefered bands to B1,B2,B3 and B4
-// Supported Bands are: 80m, 40m, 30m, 20m,17m, 15m
-
-int Band1 = 40; // Band 1 // These are my default bands. Feel free to swap with yours
-int Band2 = 30; // Band 2
-int Band3 = 20; // Band 3
-int Band4 = 17; // Band 4
+int BlinkDelay = 250;
 
 
 
@@ -415,10 +422,10 @@ void setup()
 
   pinMode(7, INPUT); //PD7 = AN1 = HiZ, PD6 = AN0 = 0
   
-INIT();
+  initialize_eeprom_data();
 
 //------------------------------- SET SI5351 VFO -----------------------------------  
-   // The crystal load value needs to match in order to have an accurate calibration
+// The crystal load value needs to match in order to have an accurate calibration
 
   si5351.set_load(SI5351_CRYSTAL_LOAD_8PF);
 
@@ -428,21 +435,17 @@ INIT();
   si5351.drive_strength(SI5351_CLK0, SI5351_DRIVE_8MA);// SET For Max Power
   si5351.drive_strength(SI5351_CLK1, SI5351_DRIVE_2MA); // Set for reduced power for RX 
 */  
- if ( digitalRead(UP) == LOW ) {
-Calibration();
- }
+ if ( digitalRead(UP) == LOW ) { Calibration(); } //if UP key is pressed during powerup, go to calibration 
  
-
   TCCR1A = 0x00;
   TCCR1B = 0x01; // Timer1 Timer 16 MHz
   TCCR1B = 0x81; // Timer1 Input Capture Noise Canceller
   ACSR |= (1<<ACIC);  // Analog Comparator Capture Input
   
   pinMode(7, INPUT); //PD7 = AN1 = HiZ, PD6 = AN0 = 0
-          digitalWrite(RX,LOW);
-
- Mode_assign(); 
-
+  digitalWrite(RX,LOW); //starrtt transceiver in RX mode
+  
+  Mode_assign(); 
 }
  
 //**************************[ END OF SETUP FUNCTION ]************************
@@ -554,11 +557,12 @@ unsigned int d1,d2;
         TX_State = 1;
           digitalWrite(TX,HIGH);
           digitalWrite(RX,LOW);
-         
-          si5351.output_enable(SI5351_CLK1, 0);   //RX off
-          si5351.output_enable(SI5351_CLK0, 1);   // TX on
+          si5351.oe(0x01); //enable CLK0         
+          //si5351.output_enable(SI5351_CLK1, 0);   //RX off
+          //si5351.output_enable(SI5351_CLK0, 1);   // TX on
       }
-      si5351.set_freq((freq * 100 + codefreq), SI5351_CLK0);  
+      si5351.freq((freq * 100 + codefreq),0,90);
+      //si5351.set_freq((freq * 100 + codefreq), SI5351_CLK0);  
       
       FSKtx = 1;
     }
@@ -568,10 +572,13 @@ unsigned int d1,d2;
   }
  }
   digitalWrite(TX,0);
-  
-    si5351.output_enable(SI5351_CLK0, 0);   //TX off
-    si5351.set_freq(freq*100ULL, SI5351_CLK1);
-          si5351.output_enable(SI5351_CLK1, 1);   //RX on
+
+    si5351.oe(0x00); // disable all outputs
+    //si5351.output_enable(SI5351_CLK0, 0);   //TX off
+    si5351.freq(freq*100ULL,0,90);
+    //si5351.set_freq(freq*100ULL, SI5351_CLK1);
+    si5351.oe(0x02); //CLK1 enable
+    //si5351.output_enable(SI5351_CLK1, 1);   //RX on
     TX_State = 0;
     digitalWrite(RX,HIGH);
   FSKtx = 0;
@@ -587,211 +594,69 @@ unsigned int d1,d2;
 
 //************************************[ MODE Assign ]**********************************
 
+void leds_off() {
+  uint8_t ledPin = 0;
+  while(ModePins[ledPin]) {
+    digitalWrite(ModePins[mode], LOW);
+    ledPin++;
+  }
+}
+
 void Mode_assign(){
-  
-addr = 40;
-EEPROM.get(addr,mode);
-
-
-if ( mode == 1){
-  freq1 = F_WSPR;
- digitalWrite(WSPR, HIGH); 
-     digitalWrite(JS8, LOW); 
-         digitalWrite(FT4, LOW); 
-             digitalWrite(FT8, LOW); 
-
-}
-
-if ( mode == 2){
-  freq1 = F_JS8;
-digitalWrite(WSPR, LOW); 
-     digitalWrite(JS8, HIGH); 
-         digitalWrite(FT4, LOW); 
-             digitalWrite(FT8, LOW); 
-
-
-  
-}
-
-if ( mode == 3){
-  freq1 = F_FT4;
-
-digitalWrite(WSPR, LOW); 
-     digitalWrite(JS8, LOW); 
-         digitalWrite(FT4, HIGH); 
-             digitalWrite(FT8, LOW); 
-
-  
-}
-if ( mode == 4){
-  freq1 = F_FT8;
-  
-digitalWrite(WSPR, LOW); 
-     digitalWrite(JS8, LOW); 
-         digitalWrite(FT4, LOW); 
-             digitalWrite(FT8, HIGH); 
-
-  
-}
-freq = freq1; 
+  leds_off();
+  EEPROM.get(40,mode);
+  digitalWrite(ModePins[mode], HIGH);
+  freq = ModeFreqs[Band_slot][mode]; 
 //freq = freq1 - 1000;
 
 }
 
 //********************************[ END OF MODE ASSIGN ]*******************************
 
-//*********************[ Band dependent Frequency Assign Function ]********************
-void Freq_assign(){
+/*
+ * This funtion blinks the LED on given pin
+ * second parameter is the blinking delay
+ */
 
+void BlinkLed(uint8_t LedPin, uint8_t dly)
+{
 
-//---------- 80m/3.5Mhz 
-          if (Band == 80){
-
-            F_FT8 = 3573000;
-            F_FT4 = 3575000;
-            F_JS8 = 3578000;
-            F_WSPR = 3568600;
-          }
-
-//---------- 40m/7 Mhz 
-          if (Band == 40){
-
-            F_FT8 = 7074000;
-            F_FT4 = 7047500;
-            F_JS8 = 7078000;
-            F_WSPR = 7038600;
-          }
-
-
-//---------- 30m/10 Mhz 
-          if (Band == 30){
-
-            F_FT8 = 10136000;
-            F_FT4 = 10140000;
-            F_JS8 = 10130000;
-            F_WSPR = 10138700;
-          }
-
-
-//---------- 20m/14 Mhz 
-          if (Band == 20){
-
-            F_FT8 = 14074000;
-            F_FT4 = 14080000;
-            F_JS8 = 14078000;
-            F_WSPR = 14095600;
-          }
-
-
- //---------- 17m/18 Mhz 
-          if (Band == 17){
-
-            F_FT8 = 18100000;
-            F_FT4 = 18104000;
-            F_JS8 = 18104000;
-            F_WSPR = 18104600;
-          } 
-
-//---------- 15m/ 21Mhz 
-          if (Band == 15){
-
-            F_FT8 = 21074000;
-            F_FT4 = 21140000;
-            F_JS8 = 21078000;
-            F_WSPR = 21094600;
-          } 
-          
+  for (uint8_t numBlinks=0;numBlinks<3;numBlinks++)
+    {
+      digitalWrite(LedPin, HIGH); 
+      delay(dly);
+      digitalWrite(LedPin, LOW); 
+      delay(dly);
+    }
 }
-//************************[ End of Frequency assign function ]*************************  
 
+
+/*
+ * This funtion blinks the given two LEDs on relevant pins
+ * third parameter is the blinking delay
+ */
+
+void BlinkLeds(uint8_t LedPin1, uint8_t LedPin2, uint8_t dly)
+{
+
+  for (uint8_t numBlinks=0;numBlinks<5;numBlinks++)
+    {
+      digitalWrite(LedPin1, HIGH); 
+      digitalWrite(LedPin2, HIGH); 
+      delay(dly);
+      digitalWrite(LedPin1, LOW); 
+      digitalWrite(LedPin2, LOW); 
+      delay(dly);
+    }
+}
 //******************************[ Band  Assign Function ]******************************
 
 void Band_assign(){
-digitalWrite(WSPR, LOW); 
-     digitalWrite(JS8, LOW); 
-         digitalWrite(FT4, LOW); 
-             digitalWrite(FT8, LOW); 
-
-
-addr = 50;
-EEPROM.get(addr,Band_slot);
-
-if (Band_slot == 1){
-  Band = Band1;
-  
-digitalWrite(FT8, HIGH); 
-delay(Bdly);
-digitalWrite(FT8, LOW); 
-delay(Bdly);
-digitalWrite(FT8, HIGH); 
-delay(Bdly);
-digitalWrite(FT8, LOW); 
-delay(Bdly);
-digitalWrite(FT8, HIGH); 
-delay(Bdly);
-digitalWrite(FT8, LOW); 
-delay(Bdly);
-}
-
-if (Band_slot == 2){
-  Band = Band2;
-  
-digitalWrite(FT4, HIGH); 
-delay(Bdly);
-digitalWrite(FT4, LOW); 
-delay(Bdly);
-digitalWrite(FT4, HIGH); 
-delay(Bdly);
-digitalWrite(FT4, LOW); 
-delay(Bdly);
-digitalWrite(FT4, HIGH); 
-delay(Bdly);
-digitalWrite(FT4, LOW); 
-delay(Bdly);
-}
-
-if (Band_slot == 3){
-  Band = Band3;
-  
-digitalWrite(JS8, HIGH); 
-delay(Bdly);
-digitalWrite(JS8, LOW); 
-delay(Bdly);
-digitalWrite(JS8, HIGH); 
-delay(Bdly);
-digitalWrite(JS8, LOW); 
-delay(Bdly);
-digitalWrite(JS8, HIGH); 
-delay(Bdly);
-digitalWrite(JS8, LOW); 
-delay(Bdly);
-}
-
-if (Band_slot == 4){
-  Band = Band4;
-  
-digitalWrite(WSPR, HIGH); 
-delay(Bdly);
-digitalWrite(WSPR, LOW); 
-delay(Bdly);
-digitalWrite(WSPR, HIGH); 
-delay(Bdly);
-digitalWrite(WSPR, LOW); 
-delay(Bdly);
-digitalWrite(WSPR, HIGH); 
-delay(Bdly);
-digitalWrite(WSPR, LOW); 
-delay(Bdly);
-}
-
-
-delay(1000);
-
-Freq_assign();
-
-Mode_assign();
-
-
+  leds_off();
+  EEPROM.get(50,Band_slot);
+  BlinkLed(ModePins[Band_slot],BlinkDelay);
+  delay(1000);
+  Mode_assign();
 }
 //***************************[ End of Band assign function ]***************************  
 
@@ -799,8 +664,9 @@ Mode_assign();
 //*******************************[ Manual TX FUNCTION ]********************************
 void ManualTX(){
  
- digitalWrite(RX,LOW);
-          si5351.output_enable(SI5351_CLK1, 0);   //RX off
+  digitalWrite(RX,LOW);
+  si5351.oe(0x00); //Disable all outputs 
+  //si5351.output_enable(SI5351_CLK1, 0);   //RX off
 
 
 TXON:  
@@ -809,8 +675,10 @@ TXSW_State = digitalRead(TXSW);
 
  
 digitalWrite(TX,1);
-    si5351.set_freq(freq1*100ULL, SI5351_CLK0);
-    si5351.output_enable(SI5351_CLK0, 1);   //TX on
+    si5351.freq(freq1*100ULL,0,90);
+    //si5351.set_freq(freq1*100ULL, SI5351_CLK0);
+    si5351.oe(0x01); //CLK0 enabled 
+    //si5351.output_enable(SI5351_CLK0, 1);   //TX on
     TX_State = 1;
     
   if (TXSW_State == HIGH) {
@@ -824,7 +692,8 @@ goto EXIT_TX;
 
 EXIT_TX:
 digitalWrite(TX,0); 
-    si5351.output_enable(SI5351_CLK0, 0);   //TX off
+    si5351.oe(0x00); //disable all outputs
+    //si5351.output_enable(SI5351_CLK0, 0);   //TX off
     TX_State = 0;
 
 }
@@ -834,176 +703,34 @@ digitalWrite(TX,0);
 //******************************[ BAND SELECT Function]********************************
 void Band_Select(){
 
-digitalWrite(TX,1);
-addr = 50; 
-EEPROM.get(addr,Band_slot);
+  digitalWrite(TX,1);
+  addr = 50; 
+  EEPROM.get(addr,Band_slot);
+  leds_off();
 
-digitalWrite(WSPR,LOW); 
-digitalWrite(JS8, LOW); 
-digitalWrite(FT4, LOW); 
-digitalWrite(FT8, LOW); 
-
-
-if (Band_slot == 1){
- 
-  
-digitalWrite(FT8, HIGH); 
-delay(Bdly);
-digitalWrite(FT8, LOW); 
-delay(Bdly);
-digitalWrite(FT8, HIGH); 
-delay(Bdly);
-digitalWrite(FT8, LOW); 
-delay(Bdly);
-digitalWrite(FT8, HIGH); 
-delay(Bdly);
-digitalWrite(FT8, LOW); 
-delay(Bdly);
-}
-
-if (Band_slot == 2){
-  
-digitalWrite(FT4, HIGH); 
-delay(Bdly);
-digitalWrite(FT4, LOW); 
-delay(Bdly);
-digitalWrite(FT4, HIGH); 
-delay(Bdly);
-digitalWrite(FT4, LOW); 
-delay(Bdly);
-digitalWrite(FT4, HIGH); 
-delay(Bdly);
-digitalWrite(FT4, LOW); 
-delay(Bdly);
-}
-
-if (Band_slot == 3){
-  
-digitalWrite(JS8, HIGH); 
-delay(Bdly);
-digitalWrite(JS8, LOW); 
-delay(Bdly);
-digitalWrite(JS8, HIGH); 
-delay(Bdly);
-digitalWrite(JS8, LOW); 
-delay(Bdly);
-digitalWrite(JS8, HIGH); 
-delay(Bdly);
-digitalWrite(JS8, LOW); 
-delay(Bdly);
-}
-
-if (Band_slot == 4){
-  
-digitalWrite(WSPR, HIGH); 
-delay(Bdly);
-digitalWrite(WSPR, LOW); 
-delay(Bdly);
-digitalWrite(WSPR, HIGH); 
-delay(Bdly);
-digitalWrite(WSPR, LOW); 
-delay(Bdly);
-digitalWrite(WSPR, HIGH); 
-delay(Bdly);
-digitalWrite(WSPR, LOW); 
-delay(Bdly);
-}
-
-Band_cont:
- 
-if (Band_slot == 1){
- 
-  
-digitalWrite(FT8, HIGH); 
-digitalWrite(JS8, LOW); 
-digitalWrite(FT4, LOW); 
-digitalWrite(WSPR, LOW); 
-}
-
-if (Band_slot == 2){
-  
-  
-digitalWrite(FT4, HIGH); 
-digitalWrite(WSPR, LOW); 
-digitalWrite(JS8, LOW); 
-digitalWrite(FT8, LOW); 
-
-}
-
-if (Band_slot == 3){
-digitalWrite(JS8, HIGH); 
-digitalWrite(WSPR, LOW); 
-digitalWrite(FT4, LOW); 
-digitalWrite(FT8, LOW); 
-
-  
-
-}
-
-if (Band_slot == 4){
-digitalWrite(JS8, LOW); 
-digitalWrite(WSPR, HIGH); 
-digitalWrite(FT4, LOW); 
-digitalWrite(FT8, LOW); 
- 
-  }
-
-
- UP_State = digitalRead(UP);
-          DOWN_State = digitalRead(DOWN);
-    
-if ((UP_State == LOW)&&(DOWN_State == HIGH)) {
-   delay(100); 
-     
-UP_State = digitalRead(UP);
-if ((UP_State == LOW)&&(DOWN_State == HIGH)) {
-Band_slot = Band_slot + 1;
-
-if (Band_slot > 4){
-Band_slot = 1;
-        }
-     }
-  } 
+  BlinkLed(ModePins[Band_slot], BlinkDelay);
+  digitalWrite(ModePins[Band_slot], HIGH); 
    
-if ((UP_State == HIGH)&&(DOWN_State == LOW)) {
-   delay(100); 
-     
-DOWN_State = digitalRead(DOWN);
-if ((UP_State == HIGH)&&(DOWN_State == LOW)) {
-Band_slot = Band_slot - 1;
-
-if (Band_slot < 1){
-Band_slot = 4;
-       }
-    }
- }
-                                                
-
-TX_State = digitalRead(TXSW);
-
-if (TX_State == LOW) {
-   delay(100); 
- 
-    TX_State = digitalRead(TXSW);
-if (TX_State == LOW) {
-  
-digitalWrite(TX,0); 
-
-   goto Band_exit;
-    
+  while (digitalRead(TXSW) != LOW)
+  {
+      if ((digitalRead(UP) == LOW)&&(digitalRead(DOWN) == HIGH)) {
+          delay(100); 
+          if ((digitalRead(UP) == LOW)&&(digitalRead(DOWN) == HIGH)) {
+              Band_slot += 1;
+          }
+      } 
+      if ((digitalRead(UP) == HIGH)&&(digitalRead(DOWN) == LOW)) {
+          delay(100); 
+          if ((digitalRead(UP) == HIGH)&&(digitalRead(DOWN) == LOW)) {
+              Band_slot -= 1;
+          }
+      }
+      Band_slot %= 4;                                                
   }
-} 
-
-goto Band_cont;
-
-Band_exit:
-
-addr = 50;
- EEPROM.put(addr, Band_slot); 
-
-
- Band_assign();
-
+ 
+  digitalWrite(TX,0); 
+  EEPROM.put(50, Band_slot); 
+  Band_assign();
 
 }
   
@@ -1012,200 +739,77 @@ addr = 50;
 
 
 
+
 //************************** [SI5351 VFO Calibration Function] ************************
 
 void Calibration(){
 
-digitalWrite(FT8, LOW);
-digitalWrite(FT4, LOW);
-digitalWrite(JS8, LOW);
-digitalWrite(WSPR, LOW);
+  leds_off();
+  BlinkLeds(WSPR, FT8, 100);
 
-digitalWrite(WSPR, HIGH); 
-digitalWrite(FT8, HIGH);
-delay(100);        
- 
-digitalWrite(WSPR, LOW); 
-digitalWrite(FT8, LOW);
-delay(100);                 
+  EEPROM.get(10, cal_factor); 
+  //Serial.print("cal factor= ");
 
-
-digitalWrite(WSPR, HIGH); 
-digitalWrite(FT8, HIGH);
-delay(100);        
- 
-digitalWrite(WSPR, LOW); 
-digitalWrite(FT8, LOW);
-delay(100);                       
-
- digitalWrite(WSPR, HIGH); 
-digitalWrite(FT8, HIGH);
-delay(100);        
- 
-digitalWrite(WSPR, LOW); 
-digitalWrite(FT8, LOW);
-delay(100);                       
-
-digitalWrite(WSPR, HIGH); 
-digitalWrite(FT8, HIGH);
-delay(100);        
- 
-digitalWrite(WSPR, LOW); 
-digitalWrite(FT8, LOW);
-delay(100);                       
-
-digitalWrite(WSPR, HIGH); 
-digitalWrite(FT8, HIGH);
-
-addr = 10;
-EEPROM.get(addr, cal_factor); 
-//Serial.print("cal factor= ");
-
-Calibrate:
-
-    UP_State = digitalRead(UP);
-
-if (UP_State == LOW) {
-   delay(50); 
+while (digitalRead(TXSW) == LOW)
+  {
+    if (digitalRead(UP) == LOW) {
+       delay(50); 
      
-UP_State = digitalRead(UP);
-if (UP_State == LOW) {
-
-cal_factor = cal_factor - 100;
-
- //EEPROM.put(addr, cal_factor); 
-
-  si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
-  
-  
-  // Set CLK2 output
-  si5351.set_freq(Cal_freq * 100, SI5351_CLK2);
-  si5351.drive_strength(SI5351_CLK2, SI5351_DRIVE_2MA); // Set for lower power for calibration
-  si5351.set_clock_pwr(SI5351_CLK2, 1); // Enable the clock for calibration
-
-  
-  }} 
-   
+        if (digitalRead(UP) == LOW) {
+          cal_factor = cal_factor - 100;
+          //EEPROM.put(addr, cal_factor); 
+          //BARIS  si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
+          // Set CLK2 output
+          si5351.freq(Cal_freq * 100,0,90); 
+          //si5351.set_freq(Cal_freq * 100, SI5351_CLK2);
+          //BARIS  si5351.drive_strength(SI5351_CLK2, SI5351_DRIVE_2MA); // Set for lower power for calibration
+          //BARIS  si5351.set_clock_pwr(SI5351_CLK2, 1); // Enable the clock for calibration
+        }
+     } 
     DOWN_State = digitalRead(DOWN);
+    if (digitalRead(DOWN) == LOW) {
+        delay(50);   
+        if (digitalRead(DOWN) == LOW) {
+            cal_factor = cal_factor + 100;
+            //EEPROM.put(addr, cal_factor); 
+            //BARIS  si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
+            // Set CLK2 output
+            si5351.freq(Cal_freq * 100,0,90);
+            //si5351.set_freq(Cal_freq * 100, SI5351_CLK2);
+            //BARIS  si5351.drive_strength(SI5351_CLK2, SI5351_DRIVE_2MA); // Set for lower power for Calibration
+            //BARIS  si5351.set_clock_pwr(SI5351_CLK2, 1); // Enable clock2 
+          }
+      } 
 
-if (DOWN_State == LOW) {
-   delay(50);   
-   
-         DOWN_State = digitalRead(DOWN);
-if (DOWN_State == LOW) {
+  } 
 
-cal_factor = cal_factor + 100;
-//EEPROM.put(addr, cal_factor); 
-    
-  si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
-  
-  // Set CLK2 output
-  si5351.set_freq(Cal_freq * 100, SI5351_CLK2);
-  si5351.drive_strength(SI5351_CLK2, SI5351_DRIVE_2MA); // Set for lower power for Calibration
-  si5351.set_clock_pwr(SI5351_CLK2, 1); // Enable clock2 
-
-  }} 
-  
- TXSW_State = digitalRead(TXSW);
-
-if (TXSW_State == LOW) {
-   delay(50);   
-   
-         TXSW_State = digitalRead(TXSW);
-if (TXSW_State == LOW) {
-  
-addr = 10;
-EEPROM.put(addr, cal_factor); 
-
-digitalWrite(TX, HIGH); 
-delay(Bdly);
-digitalWrite(TX, LOW); 
-delay(Bdly);
-digitalWrite(TX, HIGH); 
-delay(Bdly);
-digitalWrite(TX, LOW); 
-delay(Bdly);
-digitalWrite(TX, HIGH); 
-delay(Bdly);
-digitalWrite(TX, LOW); 
-
-    
-  }} 
-   goto Calibrate;
-      }
+  EEPROM.put(10, cal_factor); 
+  BlinkLed(TX, BlinkDelay);
+}
 
 //****************************** [ End Of Calibration Function ]****************************************
 
 //*********************************[ INITIALIZATION FUNCTION ]******************************************
-void INIT(){
-
-addr = 30;
-EEPROM.get(addr,temp);
-
-if (temp != 100){
-  
-    addr = 10; 
-    cal_factor = 100000;
-    EEPROM.put(addr, cal_factor); 
+void initialize_eeprom_data(){
+    EEPROM.get(30,temp); //check if eeprom is initialized before
     
-    addr = 40;
-    temp = 4;
-    EEPROM.put(addr,temp);
-    
-    addr = 30;
-    temp = 100;
-    EEPROM.put(addr,temp);
-    
-    addr = 50;
-    temp = 1;
-    EEPROM.put(addr,temp);
-
-        }
-
-else
-
-{
-    //--------------- EEPROM INIT VALUES
-    addr = 30;
-    EEPROM.get(addr,temp);
-    
-    addr = 10;
-    EEPROM.get(addr,cal_factor);
-    
-    addr = 40;
-    EEPROM.get(addr,mode);
-    
-    addr = 50;
-    EEPROM.get(addr,Band_slot);
-
-
+    if (temp != 100){ //initialize the eeprom using defaults  
+        EEPROM.put(10, 100000); //cal_factor (address 10)
+        EEPROM.put(40, 4);      //mode (address 40)
+        EEPROM.put(30, 100);    //eeprom is initialized (100 at address 30)
+        EEPROM.put(50, 1);      //Band_slot (address 50)
+    } else
+    { //get eeprom values into variables
+        EEPROM.get(30,temp);
+        EEPROM.get(10,cal_factor);
+        EEPROM.get(40,mode);
+        EEPROM.get(50,Band_slot);
     }  
-
-Band_assign();
-
-Freq_assign();
-
-Mode_assign();
-
- si5351.set_clock_pwr(SI5351_CLK2, 0); // Turn off Calibration Clock
-
+    
+    Band_assign();
+    Mode_assign();
+    //BARIS si5351.set_clock_pwr(SI5351_CLK2, 0); // Turn off Calibration Clock
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
