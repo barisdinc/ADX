@@ -1,3 +1,10 @@
+IMPORTANT NOTE ON NT7S SI5351 LIBRARY VERSIONS   
+
+Please install SI5351 Library that is in ADX Github under ADX Firmware! 
+Or use Etherkit SI5351 Library Version 2.1.3. 
+ADX firmware is compatible with only Etherkit SI5351 Library version 2.1.3.
+____________________________________________________________________________
+
 ADX is an Arduino based Digital Modes Transceiver.
 
 - ADX - is abbreviation for Arduino Digital Xceiver.
@@ -14,3 +21,4 @@ My goal with this project is to design a simple HF Transceiver optimized for ope
 -	Simple to operate – Plug in ADX MIC to soundcard MIC input and ADX SPK to PC soundcard speaker input and we are good to go with any digital modes Software.
 -	Dirt Cheap – Costs less than 25$ to get all parts and PCB if we exclude ridiculous shipping costs!
 
+- For ease of following which parts to solder while building Main board of ADX, Interactive BOM File - ibom_ADX.html file is a great help. Just run that file on Microsoft edge and follow each highlighted component and solder one by one. This interactive BOM was prepared by Gilles DELPECH - F1BFU. Thank you Gilles!
